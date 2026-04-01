@@ -1,1 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GAWYNT 3D: HIGH-NOON REALISM</title>
+    <style>
+        :root { 
+            --ui-blue: #0066ff; 
+            --ui-bg: rgba(255, 255, 255, 0.9);
+            --text: #1a1a1a;
+        }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #e0f2ff; 
+            touch-action: none; 
+            font-family: 'Inter', -apple-system, sans-serif; 
+            color: var(--text); 
+        }
+        
+        /* REALISTIC LIGHT HUD */
+        #hud { 
+            position: absolute; 
+            inset: 0; 
+            pointer-events: none; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: space-between; 
+            padding: 25px; 
+        }
+        .glass-panel { 
+            background: var(--ui-bg); 
+            border: 1px solid rgba(0,0,0,0.1); 
+            backdrop-filter: blur(10px); 
+            padding: 18px; 
+            border-radius: 12px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.05);
+        }
+        .top-left { width: 220px; border-top: 4px solid var(--ui-blue); }
+        .bottom-right { width: 280px; align-self: flex-end; border-bottom: 4px solid var(--ui-blue); text-align: right; }
+        
+        .speed-display { font-size: 3.5rem; font-weight: 800; line-height: 1; margin: 10px 0; color: var(--ui-blue); }
+        .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; opacity: 0.6; }
+        .gear-text { font-size: 1.2rem; font-weight: bold; }
 
+        /* CONTROL OVERLAY */
+        #controls { position: absolute; bottom: 30px; left: 30px; display: flex; gap: 12px; pointer-events: auto; }
+        .ctrl-btn { 
+            width: 70px; height: 70px; background: white; border: 2px solid #ddd;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 0.7rem; font-weight: 900; transition: 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .ctrl-btn:active { background: var(--ui-blue); color: white; transform: scale(0.9); border-color: transparent; }
+        #gas-btn { width: 90px; height: 90px; color: var(--ui-blue); border-color: var(--ui-blue); }
+
+        @media (min-width: 900px) { #controls { display: none; } }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <div class="glass-panel top-left">
+            <div class="label">Navigation System</div>
+            <div style="font-weight: bold; margin-bottom: 5px;">GAWYNT_CITY_MAP</div>
+            <div id="sector" style="font-size: 0.85rem; color: var(--ui-blue);">SECTOR: 01A_CORE</div>
+            <div id="pos-data" style="font-family: monospace; font-size: 0.7rem; margin-top: 5px;">LOC: 0, 0</div>
+        </div>
+
+        <div class="glass-panel bottom-right">
+            <div class="label">Telemetry</div>
+            <div class="speed-display" id="speedometer">00</div>
+            <div class="gear-text" id="gear-indicator">D - DRIVE</div>
+        </div>
+    </div>
+
+    <div id="controls">
+        <div class="ctrl-btn" id="l-btn">LEFT</div>
+        <div class="ctrl-btn" id="gas-btn">GAS</div>
+        <div class="ctrl-btn" id="r-btn">REV</div>
+        <div class="ctrl-btn" id="right-btn">RIGHT</div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- 1. SETTINGS & PHYSICS CONFIG ---
+    const PARAMS = {
+        MAX_FWD: 8.2,
+        MAX_REV: -2.8,
+        ACCEL: 0.1,
+        FRICTION: 0.985,
+        STEER: 0.042,
+        WORLD_DIM: 8000,
+        SKYSCRAPER_COUNT: 750
+    };
+
+    // --- 2. ENGINE SETUP ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xd0eaff); // Bright Sky Blue
+    scene.fog = new THREE.FogExp2(0xd0eaff, 0.001);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+
+    // --- 3. REALISTIC LIGHTING (LIGHT MODE) ---
+    const ambient = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0); // Bounced light
+    scene.add(ambient);
+
+    const sun = new THREE.DirectionalLight(0xfff5e6, 1.8); // Warm sunlight
+    sun.position.set(200, 400, 100);
+    scene.add(sun);
+
+    // --- 4. TEXTURE GENERATOR ---
+    class TextureFactory {
+        static getRoad() {
+            const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#444444'; ctx.fillRect(0,0,512,512);
+            // Sidewalk lines
+            ctx.fillStyle = '#666666'; ctx.fillRect(0,0,512,20); ctx.fillRect(0,492,512,20);
+            // White Dashes
+            ctx.fillStyle = '#ffffff';
+            for(let i=0; i<8; i++) ctx.fillRect(245, 10 + i*65, 22, 35);
+            const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            return t;
+        }
+
+        static getFacade() {
+            const c = document.createElement('canvas'); c.width = 256; c.height = 512;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,256,512);
+            ctx.fillStyle = '#334455';
+            for(let y=20; y<512; y+=45) for(let x=15; x<256; x+=35) {
+                ctx.fillRect(x, y, 20, 25);
+            }
+            return new THREE.CanvasTexture(c);
+        }
+    }
+
+    // --- 5. WORLD ARCHITECTURE ---
+    class City {
+        constructor() {
+            this.colliders = [];
+            this.build();
+        }
+
+        build() {
+            // Ground Plane
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(PARAMS.WORLD_DIM, PARAMS.WORLD_DIM),
+                new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 })
+            );
+            ground.rotation.x = -Math.PI/2;
+            scene.add(ground);
+
+            // Main Road
+            const roadTex = TextureFactory.getRoad();
+            roadTex.repeat.set(1, 200);
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(55, PARAMS.WORLD_DIM),
+                new THREE.MeshStandardMaterial({ map: roadTex })
+            );
+            road.rotation.x = -Math.PI/2;
+            road.position.y = 0.05;
+            scene.add(road);
+
+            // Skyscrapers
+            const facade = TextureFactory.getFacade();
+            const bGeo = new THREE.BoxGeometry(1, 1, 1);
+            for(let i=0; i<PARAMS.SKYSCRAPER_COUNT; i++) {
+                const h = 40 + Math.random() * 220;
+                const w = 25 + Math.random() * 20;
+                const color = new THREE.Color().setHSL(0, 0, 0.7 + Math.random()*0.3);
+                const b = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({ map: facade, color: color }));
+                
+                b.scale.set(w, h, w);
+                let x = (Math.random()-0.5) * 4000;
+                let z = (Math.random()-0.5) * 4000;
+                if(Math.abs(x) < 55) x += 110 * (x > 0 ? 1 : -1);
+
+                b.position.set(x, h/2, z);
+                scene.add(b);
+                this.colliders.push({ x, z, r: w/1.8 });
+            }
+        }
+    }
+
+    // --- 6. REALISTIC VEHICLE ---
+    class Vehicle {
+        constructor() {
+            this.group = new THREE.Group();
+            this.speed = 0;
+            this.angle = 0;
+            this.buildBody();
+            scene.add(this.group);
+        }
+
+        buildBody() {
+            const mat = new THREE.MeshStandardMaterial({ color: 0x0066ff, metalness: 0.7, roughness: 0.2 });
+            // Chassis
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.7, 5), mat);
+            this.group.add(body);
+            // Cabin
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 2), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+            cabin.position.set(0, 0.6, 0.2);
+            this.group.add(cabin);
+            // Spoiler
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.1, 0.8), new THREE.MeshStandardMaterial({ color: 0x000 }));
+            wing.position.set(0, 0.85, -2.1);
+            this.group.add(wing);
+            // Tail Lights (Reverse)
+            this.revLights = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 }));
+            this.revLights.position.set(0, 0.1, -2.55);
+            this.group.add(this.revLights);
+        }
+
+        update(input, colliders) {
+            // Speed Management
+            if(input.gas) this.speed += PARAMS.ACCEL;
+            else if(input.rev) this.speed -= PARAMS.ACCEL;
+            else this.speed *= PARAMS.FRICTION;
+
+            this.speed = Math.max(Math.min(this.speed, PARAMS.MAX_FWD), PARAMS.MAX_REV);
+            this.revLights.material.opacity = this.speed < -0.1 ? 1 : 0;
+
+            // Steering Logic
+            const steerDir = this.speed < 0 ? -1 : 1;
+            const power = PARAMS.STEER / (1 + Math.abs(this.speed) * 0.25);
+            if(Math.abs(this.speed) > 0.05) {
+                if(input.l) this.angle += power * steerDir;
+                if(input.r) this.angle -= power * steerDir;
+            }
+
+            // Sub-stepping Collision
+            const steps = 4;
+            for(let i=0; i<steps; i++) {
+                const nextX = this.group.position.x + Math.sin(this.angle) * (this.speed / steps);
+                const nextZ = this.group.position.z + Math.cos(this.angle) * (this.speed / steps);
+                
+                let hit = false;
+                for(let c of colliders) {
+                    const dx = nextX - c.x; const dz = nextZ - c.z;
+                    if(dx*dx + dz*dz < c.r * c.r) { hit = true; break; }
+                }
+
+                if(!hit) {
+                    this.group.position.x = nextX;
+                    this.group.position.z = nextZ;
+                } else {
+                    this.speed *= -0.4; // Bounce
+                    break;
+                }
+            }
+            this.group.rotation.y = this.angle;
+        }
+    }
+
+    // --- 7. APP CONTROLLER ---
+    const world = new City();
+    const car = new Vehicle();
+    const input = { gas: 0, rev: 0, l: 0, r: 0 };
+
+    // Events
+    window.onkeydown = (e) => {
+        if(e.code==='KeyW'||e.code==='ArrowUp') input.gas = 1;
+        if(e.code==='KeyS'||e.code==='ArrowDown') input.rev = 1;
+        if(e.code==='KeyA'||e.code==='ArrowLeft') input.l = 1;
+        if(e.code==='KeyD'||e.code==='ArrowRight') input.r = 1;
+    };
+    window.onkeyup = (e) => {
+        if(e.code==='KeyW'||e.code==='ArrowUp') input.gas = 0;
+        if(e.code==='KeyS'||e.code==='ArrowDown') input.rev = 0;
+        if(e.code==='KeyA'||e.code==='ArrowLeft') input.l = 0;
+        if(e.code==='KeyD'||e.code==='ArrowRight') input.r = 0;
+    };
+
+    const bind = (id, k) => {
+        const el = document.getElementById(id);
+        el.ontouchstart = (e) => { e.preventDefault(); input[k] = 1; };
+        el.ontouchend = () => input[k] = 0;
+    };
+    bind('l-btn', 'l'); bind('gas-btn', 'gas'); bind('r-btn', 'rev'); bind('right-btn', 'r');
+
+    function animate() {
+        requestAnimationFrame(animate);
+        car.update(input, world.colliders);
+
+        // UI Telemetry
+        document.getElementById('speedometer').innerText = Math.floor(Math.abs(car.speed) * 125);
+        document.getElementById('gear-indicator').innerText = car.speed < -0.1 ? "R - REVERSE" : "D - DRIVE";
+        document.getElementById('pos-data').innerText = `LOC: ${car.group.position.x.toFixed(0)}, ${car.group.position.z.toFixed(0)}`;
+
+        // Static Realism Camera
+        const tx = car.group.position.x - Math.sin(car.angle) * 16;
+        const tz = car.group.position.z - Math.cos(car.angle) * 16;
+        camera.position.lerp(new THREE.Vector3(tx, 6, tz), 0.15);
+        camera.lookAt(car.group.position.x, 1.2, car.group.position.z);
+
+        renderer.render(scene, camera);
+    }
+
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+
+    animate();
+</script>
+</body>
+</html>
